@@ -6,14 +6,16 @@ This is a work in progress Go port of the awesome Python [howdoi](https://github
 ## Installing
 
 ```
-go get -u ellisonleao/howdoi
+go get -u github.com/ellisonleao/howdoi
 ```
 
 ## Usage
 
+```
 howdoi [flags] question:
   -a	display the full text of the answer
   -n int
     	number of answers to return (default 1)
   -p int
     	select answer in specified position
+```
