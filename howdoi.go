@@ -2,36 +2,78 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	flag "github.com/ogier/pflag"
 )
 
 const (
-	requestURL   = "https://www.google.com/search?q=site:%s%%20%s"
-	answerHeader = "%s \n----\n Answer from %s"
+	version       = "0.1.0"
+	requestURL    = "https://www.google.com/search?q=site:%s%%20%s"
+	answerFooter  = "%s \n----\n Answer from %s"
+	answerHeader  = "--- Answer %d --\n %s"
+	noAnswer      = "< no answer given >"
+	noAnswerFound = "Sorry, couldn't find any help with that topic"
+	help          = `
+	usage: howdoi [-h|--help] [-p|--pos POS] [-a|--all] [-l|--link] [-n|--num-answers NUM_ANSWERS] [-v|--version]
+              [QUERY [QUERY ...]]
+
+instant coding answers via the command line
+
+positional arguments:
+  QUERY                 the question to answer
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -p POS, --pos POS     select answer in specified position (default: 1)
+  -a, --all             display the full text of the answer
+  -l, --link            display only the answer link
+  -n NUM_ANSWERS, --num-answers NUM_ANSWERS
+                        number of answers to return
+  -v, --version         displays the current version of howdoi`
 )
 
 // Howdoi is the main struct for the howdoi command with its flags
 type Howdoi struct {
-	Position    int
+
+	// Position argument grabs a specific answer position in a list of answers.
+	// Negative values and numbers greater than the number of answers will be handled as well
+	Position int
+
+	// ShowAllText displays the full answer instead of just the code part
 	ShowAllText bool
-	ColorOutput bool
-	NumAnswers  int
-	Question    string
+
+	// ShowLinkOnly displays only the answer link
+	ShowLinkOnly bool
+
+	// NumAnswers will show a number of answers between 1 and total answers
+	NumAnswers int
+
+	// Question records the current input question
+	Question string
+
+	// ShowHelp will output the help
+	ShowHelp bool
+
+	// ShowVersion will output the current version
+	ShowVersion bool
 }
 
 // Init will create a new Howdoi object and set the flags to it
 func Init() *Howdoi {
 	h := &Howdoi{}
 
-	flag.IntVar(&h.Position, "p", 1, "select answer in specified position")
-	flag.BoolVar(&h.ShowAllText, "a", false, "display the full text of the answer")
-	//flag.IntVar(&h.NumAnswers, "n", 1, "number of answers to return")
+	flag.IntVar(&h.Position, "pos", 1, "select answer in specified position")
+	flag.BoolVar(&h.ShowAllText, "all", false, "display the full text of the answer")
+	flag.BoolVar(&h.ShowLinkOnly, "link", false, "display only the answer link")
+	flag.IntVar(&h.NumAnswers, "num-answers", 1, "number of answers to return")
+	flag.BoolVar(&h.ShowHelp, "help", false, "show this help message and exit")
+	flag.BoolVar(&h.ShowVersion, "version", false, "show current version")
 
 	return h
 }
@@ -40,6 +82,16 @@ func Init() *Howdoi {
 func (h *Howdoi) Execute() {
 	flag.Parse()
 
+	if h.ShowHelp {
+		fmt.Println(help)
+		os.Exit(0)
+	}
+
+	if h.ShowVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
+
 	// smal check on position value
 	if h.Position <= 0 {
 		h.Position = 1
@@ -47,7 +99,8 @@ func (h *Howdoi) Execute() {
 
 	err := h.sanitizeQuestion(flag.Args())
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(help)
+		os.Exit(1)
 	}
 
 	links, err := h.getLinks()
@@ -55,7 +108,7 @@ func (h *Howdoi) Execute() {
 		log.Fatal(err)
 	}
 
-	answer, err := h.getAnswer(links[h.Position-1])
+	answer, err := h.getAnswer(links)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,7 +142,8 @@ func (h *Howdoi) getLinks() ([]string, error) {
 	if len(result.Nodes) == 0 {
 		result = doc.Find(".r a")
 		if len(result.Nodes) == 0 {
-			log.Fatal("No answers found")
+			fmt.Println(noAnswerFound)
+			os.Exit(0)
 		}
 	}
 	links := []string{}
@@ -111,7 +165,32 @@ func (h *Howdoi) getLinks() ([]string, error) {
 	return links, nil
 }
 
-func (h *Howdoi) getAnswer(link string) (string, error) {
+func (h *Howdoi) getAnswer(links []string) (string, error) {
+	var output string
+
+	// validating position
+	if h.Position > len(links) {
+		h.Position = 1
+	}
+
+	// do not show answer header if there is only one answer to return
+	if h.NumAnswers == 1 {
+		if h.ShowLinkOnly {
+			return links[h.Position-1], nil
+		}
+		return getAnswerText(links[h.Position-1]), nil
+	}
+
+	links = links[0:h.NumAnswers]
+	for i, link := range links {
+		answer := getAnswerText(link)
+		output += fmt.Sprintf(answerHeader, i+1, answer)
+	}
+
+	return output, nil
+}
+
+func getAnswerText(link string) string {
 	link = fmt.Sprintf("%s?answertab=votes", link)
 	req, err := goquery.NewDocument(link)
 	if err != nil {
@@ -120,7 +199,7 @@ func (h *Howdoi) getAnswer(link string) (string, error) {
 
 	answerDiv := req.Find(".answer")
 	if len(answerDiv.Nodes) == 0 {
-		return "", errors.New("No answers found")
+		return noAnswer
 	}
 
 	answerDiv = answerDiv.First()
@@ -132,8 +211,7 @@ func (h *Howdoi) getAnswer(link string) (string, error) {
 		if len(instructions.Nodes) == 0 {
 			instructions = answerDiv.Find("code")
 		}
-		return instructions.First().Text(), nil
+		return instructions.First().Text()
 	}
-	output := fmt.Sprintf(answerHeader, answerDiv.Find(".post-text > *").Text(), link)
-	return output, nil
+	return fmt.Sprintf(answerFooter, answerDiv.Find(".post-text > *").Text(), link)
 }
