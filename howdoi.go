@@ -42,8 +42,7 @@ optional arguments:
 type Howdoi struct {
 
 	// Position argument grabs a specific answer position in a list of answers.
-	// Negative values and numbers greater than the number of answers will be handled as well
-	Position int
+	Position uint16
 
 	// ShowAllText displays the full answer instead of just the code part
 	ShowAllText bool
@@ -52,7 +51,7 @@ type Howdoi struct {
 	ShowLinkOnly bool
 
 	// NumAnswers will show a number of answers between 1 and total answers
-	NumAnswers int
+	NumAnswers uint16
 
 	// Question records the current input question
 	Question string
@@ -68,12 +67,12 @@ type Howdoi struct {
 func Init() *Howdoi {
 	h := &Howdoi{}
 
-	flag.IntVar(&h.Position, "pos", 1, "select answer in specified position")
-	flag.BoolVar(&h.ShowAllText, "all", false, "display the full text of the answer")
-	flag.BoolVar(&h.ShowLinkOnly, "link", false, "display only the answer link")
-	flag.IntVar(&h.NumAnswers, "num-answers", 1, "number of answers to return")
-	flag.BoolVar(&h.ShowHelp, "help", false, "show this help message and exit")
-	flag.BoolVar(&h.ShowVersion, "version", false, "show current version")
+	flag.Uint16VarP(&h.Position, "pos", "p", 1, "select answer in specified position")
+	flag.BoolVarP(&h.ShowAllText, "all", "a", false, "display the full text of the answer")
+	flag.BoolVarP(&h.ShowLinkOnly, "link", "l", false, "display only the answer link")
+	flag.Uint16VarP(&h.NumAnswers, "num-answers", "n", 1, "number of answers to return")
+	flag.BoolVarP(&h.ShowHelp, "help", "h", false, "show this help message and exit")
+	flag.BoolVarP(&h.ShowVersion, "version", "v", false, "show current version")
 
 	return h
 }
@@ -92,8 +91,8 @@ func (h *Howdoi) Execute() {
 		os.Exit(0)
 	}
 
-	// smal check on position value
-	if h.Position <= 0 {
+	// position must be > 0
+	if h.Position == 0 {
 		h.Position = 1
 	}
 
@@ -151,13 +150,14 @@ func (h *Howdoi) getLinks() ([]string, error) {
 	result.Each(func(i int, s *goquery.Selection) {
 		link, _ := s.Attr("href")
 		parsed, err := url.Parse(link)
+		if err != nil {
+			fmt.Println("ERROR on Link", link)
+			return
+		}
 		query := parsed.Query()
 		link = query["q"][0]
 
-		if err != nil {
-			//TODO!
-			fmt.Println("ERROR on Link", link)
-		} else if strings.Contains(link, "question") {
+		if strings.Contains(link, "question") {
 			// adding only the questions links
 			links = append(links, link)
 		}
@@ -167,11 +167,6 @@ func (h *Howdoi) getLinks() ([]string, error) {
 
 func (h *Howdoi) getAnswer(links []string) (string, error) {
 	var output string
-
-	// validating position
-	if h.Position > len(links) {
-		h.Position = 1
-	}
 
 	// do not show answer header if there is only one answer to return
 	if h.NumAnswers == 1 {
@@ -194,7 +189,8 @@ func getAnswerText(link string) string {
 	link = fmt.Sprintf("%s?answertab=votes", link)
 	req, err := goquery.NewDocument(link)
 	if err != nil {
-		log.Fatal(errors.New("Could not get answer. Pleasy try again later"))
+		fmt.Println("Could not get answer. Pleasy try again later")
+		os.Exit(1)
 	}
 
 	answerDiv := req.Find(".answer")
